@@ -20,6 +20,11 @@ def webhook():
     if update.message and update.message.text:
     user_text = update.message.text
 
+    response = model.generate_content(user_text)
+    reply = response.text
+
+    bot.send_message(chat_id=update.message.chat.id, text=reply)
+
         response = model.generate_content(user_text)
         reply = response.text
 
