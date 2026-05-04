@@ -19,7 +19,7 @@ def ask_gemini(text):
             contents=text
         )
 
-        return response.text
+        return response.text or "⚠️ Empty response from Gemini"
 
     except Exception as e:
         print("GEMINI ERROR:", e)
