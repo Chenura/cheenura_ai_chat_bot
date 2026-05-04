@@ -15,7 +15,7 @@ app = Flask(__name__)
 def ask_gemini(text):
     try:
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-pro",
             contents=text
         )
 
