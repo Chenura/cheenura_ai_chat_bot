@@ -3,7 +3,7 @@ from flask import Flask, request
 import telegram
 import google.generativeai as genai
 
-BOT_TOKEN = os.getenv("8705990042:AAHzjRKckv54CgPdlh2dnt470CZQ4ureJQs")
+BOT_TOKEN = os.getenv("8705990042:AAF3qtbkRqf5aa7SW2VtlF0UEabCQHWbKTE")
 GEMINI_API_KEY = os.getenv("AIzaSyBUk8vPeU24c1Hgr2_CoGYswseoGR36jAo")
 
 genai.configure(api_key=GEMINI_API_KEY)
