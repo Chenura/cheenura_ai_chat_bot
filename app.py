@@ -3,14 +3,14 @@ from flask import Flask, request
 import telegram
 import google.generativeai as genai
 
-# Load environment variables
+# Environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # Configure Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 
-# ✅ Use a current working model
+# Use a modern model
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 # Telegram bot
@@ -18,6 +18,33 @@ bot = telegram.Bot(token=BOT_TOKEN)
 
 # Flask app
 app = Flask(__name__)
+
+
+def get_gemini_reply(user_text):
+    try:
+        response = model.generate_content(user_text)
+
+        print("\n=== GEMINI RAW RESPONSE ===")
+        print(response)
+        print("===========================\n")
+
+        # ✅ Method 1: direct text
+        if hasattr(response, "text") and response.text:
+            return response.text
+
+        # ✅ Method 2: fallback parsing
+        try:
+            return response.candidates[0].content.parts[0].text
+        except Exception:
+            return "⚠️ Gemini returned an empty response."
+
+    except Exception as e:
+        print("\n=== GEMINI ERROR ===")
+        print(e)
+        print("====================\n")
+
+        return "❌ AI is currently unavailable. Please try again later."
+
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
@@ -28,31 +55,21 @@ def webhook():
         if update.message and update.message.text:
             user_text = update.message.text
 
-            try:
-                # 🔥 Gemini request
-                response = model.generate_content(
-                    user_text,
-                    generation_config={
-                        "temperature": 0.7,
-                        "max_output_tokens": 300
-                    }
-                )
+            print(f"\n📩 User message: {user_text}")
 
-                # ✅ Safe extraction
-                reply = response.text if hasattr(response, "text") else "No response from AI."
+            reply = get_gemini_reply(user_text)
 
-            except Exception as e:
-                print("Gemini ERROR:", e)
-                reply = "AI is currently unavailable. Try again later."
+            print(f"🤖 Bot reply: {reply}\n")
 
-            # Send reply to user
             bot.send_message(
                 chat_id=update.message.chat.id,
                 text=reply
             )
 
     except Exception as e:
-        print("Webhook ERROR:", e)
+        print("\n=== WEBHOOK ERROR ===")
+        print(e)
+        print("====================\n")
 
     return "ok"
 
