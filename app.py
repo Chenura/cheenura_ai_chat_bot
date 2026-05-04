@@ -10,7 +10,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-pro")
 
 bot = telegram.Bot(token=BOT_TOKEN)
-app = Flask(name)
+app = Flask(__name__)
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
