@@ -19,7 +19,7 @@ def ask_gemini(text):
             contents=text
         )
 
-        return response.text or "⚠️ Empty response from Gemini"
+        return response.text
 
     except Exception as e:
         print("GEMINI ERROR:", e)
@@ -32,9 +32,7 @@ def webhook():
     update = telegram.Update.de_json(data, bot)
 
     if update.message and update.message.text:
-        user_text = update.message.text
-
-        reply = ask_gemini(user_text)
+        reply = ask_gemini(update.message.text)
 
         bot.send_message(
             chat_id=update.message.chat.id,
