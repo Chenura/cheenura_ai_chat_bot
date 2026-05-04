@@ -17,8 +17,8 @@ def webhook():
     data = request.get_json(force=True)
     update = telegram.Update.de_json(data, bot)
 
-    if update.message:
-        user_text = update.message.text
+    if update.message and update.message.text:
+    user_text = update.message.text
 
         response = model.generate_content(user_text)
         reply = response.text
