@@ -3,8 +3,8 @@ from flask import Flask, request
 import telegram
 import google.generativeai as genai
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+BOT_TOKEN = os.getenv("8705990042:AAHzjRKckv54CgPdlh2dnt470CZQ4ureJQs")
+GEMINI_API_KEY = os.getenv("AIzaSyBUk8vPeU24c1Hgr2_CoGYswseoGR36jAo")
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-pro")
@@ -18,17 +18,15 @@ def webhook():
     update = telegram.Update.de_json(data, bot)
 
     if update.message and update.message.text:
-    user_text = update.message.text
-
-    response = model.generate_content(user_text)
-    reply = response.text
-
-    bot.send_message(chat_id=update.message.chat.id, text=reply)
+        user_text = update.message.text
 
         response = model.generate_content(user_text)
         reply = response.text
 
-        bot.send_message(chat_id=update.message.chat.id, text=reply)
+        bot.send_message(
+            chat_id=update.message.chat.id,
+            text=reply
+        )
 
     return "ok"
 
