@@ -4,7 +4,7 @@ import telegram
 import google.generativeai as genai
 
 BOT_TOKEN = os.getenv("8705990042:AAHEGU2Fb1hFaOFD5Lihr8gAwpcGR8NgUUY")
-GEMINI_API_KEY = os.getenv("AIzaSyBUk8vPeU24c1Hgr2_CoGYswseoGR36jAo")
+GEMINI_API_KEY = os.getenv("AIzaSyBC35qd5Wzf6cyWQqEQewmRbX6OtJ1gxAk")
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-pro")
