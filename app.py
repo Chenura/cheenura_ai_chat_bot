@@ -1,51 +1,77 @@
-import os
 from flask import Flask, request
-import telegram
-from google import genai
+import requests
+import os
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-
-bot = telegram.Bot(token=BOT_TOKEN)
 app = Flask(__name__)
 
+# 🔐 ENV VARIABLES (SET THESE IN RENDER)
+TOKEN = os.getenv("TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-def ask_gemini(text):
+TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+
+# 🤖 Gemini AI function (UPDATED)
+def ask_gemini(prompt):
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "contents": [
+            {
+                "parts": [{"text": prompt}]
+            }
+        ]
+    }
+
     try:
-        response = client.models.generate_content(
-            model="gemini-pro",
-            contents=text
-        )
+        response = requests.post(url, headers=headers, json=data)
+        result = response.json()
 
-        return response.text
+        return result["candidates"][0]["content"]["parts"][0]["text"]
 
     except Exception as e:
-        print("GEMINI ERROR:", e)
-        return f"❌ Gemini Error:\n{str(e)}"
+        print("Gemini Error:", e)
+        return "⚠️ AI is busy, try again later."
 
+# 🏠 Home route (for Render check)
+@app.route('/')
+def home():
+    return "🤖 Bot is running!"
 
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+# 📩 Telegram webhook
+@app.route('/webhook', methods=['POST'])
 def webhook():
-    data = request.get_json(force=True)
-    update = telegram.Update.de_json(data, bot)
+    data = request.get_json()
 
-    if update.message and update.message.text:
-        reply = ask_gemini(update.message.text)
+    if "message" in data:
+        chat_id = data["message"]["chat"]["id"]
+        user_text = data["message"].get("text", "")
 
-        bot.send_message(
-            chat_id=update.message.chat.id,
-            text=reply
-        )
+        # ⏳ Optional: typing effect
+        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendChatAction", json={
+            "chat_id": chat_id,
+            "action": "typing"
+        })
+
+        # 🤖 Get AI reply
+        reply = ask_gemini(user_text)
+
+        # 🛑 Fallback if error
+        if not reply or "error" in reply.lower():
+            reply = "🤖 I'm having trouble right now. Try again later."
+
+        # 📤 Send message
+        requests.post(TELEGRAM_URL, json={
+            "chat_id": chat_id,
+            "text": reply
+        })
 
     return "ok"
 
 
-@app.route("/")
-def home():
-    return "Bot running!"
-
-
+# 🚀 Run locally (Render uses gunicorn)
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
