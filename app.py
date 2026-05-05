@@ -121,7 +121,7 @@ def webhook():
 
         # 🤖 Bot logic
         if text == "/start":
-            reply = "Hello! I'm your Gemini 2.5 AI assistant. Ask me anything."
+            reply = "Hello! I'm your Chenura Ai Chat Bot Powered By Shadow Technologies. Ask me anything."
 
         elif text == "/users":
             if chat_id == ADMIN_ID:
