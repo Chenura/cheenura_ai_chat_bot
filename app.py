@@ -6,29 +6,29 @@ from pymongo import MongoClient
 
 app = Flask(__name__)
 
-# 🔐 Environment variables
+# =========================
+# 🔐 ENV VARIABLES
+# =========================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 MONGO_URI = os.environ.get("MONGO_URI")
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN not set")
-
 if not GEMINI_API_KEY:
     raise ValueError("GEMINI_API_KEY not set")
-
 if not MONGO_URI:
     raise ValueError("MONGO_URI not set")
 
-# 🤖 Telegram API
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# 🗄️ MongoDB
+# =========================
+# 🗄️ DATABASE
+# =========================
 client = MongoClient(MONGO_URI)
 db = client["telegram_bot"]
 users_collection = db["users"]
 
-# 👤 Your Telegram ID
 ADMIN_ID = 1294323193
 
 
@@ -38,7 +38,6 @@ ADMIN_ID = 1294323193
 def save_user(user):
     if not user.get("id"):
         return
-
     if not users_collection.find_one({"id": user["id"]}):
         users_collection.insert_one(user)
 
@@ -48,10 +47,13 @@ def get_user_count():
 
 
 # =========================
-# 🤖 GEMINI 2.5 FUNCTION (UPGRADED)
+# 🤖 GEMINI (2.5 + FALLBACK)
 # =========================
 def get_gemini_response(user_message):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    models = [
+        "gemini-2.5-flash",   # primary
+        "gemini-1.5-flash"    # fallback
+    ]
 
     data = {
         "contents": [
@@ -61,34 +63,32 @@ def get_gemini_response(user_message):
         ]
     }
 
-    # 🔁 Retry up to 3 times (fix 503 issue)
-    for attempt in range(3):
-        try:
-            response = requests.post(url, json=data)
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
 
-            print("Gemini status:", response.status_code)
-            print("Gemini response:", response.text)
+        for attempt in range(2):
+            try:
+                response = requests.post(url, json=data)
 
-            if response.status_code == 200:
-                result = response.json()
+                print(f"Model: {model}, Status:", response.status_code)
 
-                # ✅ Safe parsing
-                if "candidates" in result:
-                    return result["candidates"][0]["content"]["parts"][0]["text"]
+                if response.status_code == 200:
+                    result = response.json()
+
+                    if "candidates" in result:
+                        return result["candidates"][0]["content"]["parts"][0]["text"]
+
+                elif response.status_code == 503:
+                    time.sleep(2)
+
                 else:
-                    return "AI returned no response"
+                    break
 
-            elif response.status_code == 503:
-                time.sleep(2)  # wait and retry
+            except Exception as e:
+                print("Error:", e)
+                break
 
-            else:
-                return "AI error. Try again later."
-
-        except Exception as e:
-            print("Exception:", str(e))
-            return "AI crashed"
-
-    return "AI is busy right now. Try again in a few seconds."
+    return "⚠️ AI is currently overloaded. Please try again in a moment."
 
 
 # =========================
@@ -96,7 +96,10 @@ def get_gemini_response(user_message):
 # =========================
 def send_message(chat_id, text):
     url = f"{TELEGRAM_API_URL}/sendMessage"
-    requests.post(url, json={"chat_id": chat_id, "text": text})
+    requests.post(url, json={
+        "chat_id": chat_id,
+        "text": text
+    })
 
 
 def send_typing(chat_id):
@@ -108,7 +111,7 @@ def send_typing(chat_id):
 
 
 # =========================
-# 🚀 MAIN WEBHOOK
+# 🚀 WEBHOOK
 # =========================
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -134,17 +137,16 @@ def webhook():
         }
         save_user(user_data)
 
-        # ⏳ Show typing
+        # ⏳ Typing indicator
         send_typing(chat_id)
 
-        # 🤖 Bot commands
+        # 🤖 Commands
         if text == "/start":
             reply = "Hello! I'm Chenura AI Chat Bot 🤖\nPowered by Gemini 2.5.\nAsk me anything."
 
         elif text == "/users":
             if chat_id == ADMIN_ID:
-                count = get_user_count()
-                reply = f"👥 Total users: {count}"
+                reply = f"👥 Total users: {get_user_count()}"
             else:
                 reply = "❌ Not allowed"
 
@@ -168,7 +170,7 @@ def home():
 
 
 # =========================
-# ▶️ RUN APP
+# ▶️ RUN
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
