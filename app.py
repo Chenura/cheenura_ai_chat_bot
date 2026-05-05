@@ -1,6 +1,7 @@
 from flask import Flask, request
 import requests
 import os
+import time
 from pymongo import MongoClient
 
 app = Flask(__name__)
@@ -22,77 +23,93 @@ if not MONGO_URI:
 # 🤖 Telegram API
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# 🗄️ MongoDB connection
+# 🗄️ MongoDB
 client = MongoClient(MONGO_URI)
 db = client["telegram_bot"]
 users_collection = db["users"]
 
-# 👤 Replace with YOUR Telegram ID
+# 👤 Your Telegram ID
 ADMIN_ID = 1294323193
 
 
-# ✅ Save user to database
+# =========================
+# 👤 USER FUNCTIONS
+# =========================
 def save_user(user):
     if not user.get("id"):
         return
 
-    existing = users_collection.find_one({"id": user["id"]})
-
-    if not existing:
+    if not users_collection.find_one({"id": user["id"]}):
         users_collection.insert_one(user)
 
 
-# ✅ Count users
 def get_user_count():
     return users_collection.count_documents({})
 
 
-# ✅ Gemini 2.5 AI function
+# =========================
+# 🤖 GEMINI 2.5 FUNCTION (UPGRADED)
+# =========================
 def get_gemini_response(user_message):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
-
-    headers = {
-        "Content-Type": "application/json"
-    }
 
     data = {
         "contents": [
             {
-                "parts": [
-                    {"text": user_message}
-                ]
+                "parts": [{"text": user_message}]
             }
         ]
     }
 
-    try:
-        response = requests.post(url, headers=headers, json=data)
+    # 🔁 Retry up to 3 times (fix 503 issue)
+    for attempt in range(3):
+        try:
+            response = requests.post(url, json=data)
 
-        print("Gemini status:", response.status_code)
-        print("Gemini response:", response.text)
+            print("Gemini status:", response.status_code)
+            print("Gemini response:", response.text)
 
-        if response.status_code != 200:
-            return "Error: AI not working"
+            if response.status_code == 200:
+                result = response.json()
 
-        result = response.json()
-        return result["candidates"][0]["content"]["parts"][0]["text"]
+                # ✅ Safe parsing
+                if "candidates" in result:
+                    return result["candidates"][0]["content"]["parts"][0]["text"]
+                else:
+                    return "AI returned no response"
 
-    except Exception as e:
-        print("Exception:", str(e))
-        return "Error: AI crashed"
+            elif response.status_code == 503:
+                time.sleep(2)  # wait and retry
+
+            else:
+                return "AI error. Try again later."
+
+        except Exception as e:
+            print("Exception:", str(e))
+            return "AI crashed"
+
+    return "AI is busy right now. Try again in a few seconds."
 
 
-# ✅ Send message to Telegram
+# =========================
+# 📤 TELEGRAM FUNCTIONS
+# =========================
 def send_message(chat_id, text):
     url = f"{TELEGRAM_API_URL}/sendMessage"
+    requests.post(url, json={"chat_id": chat_id, "text": text})
 
+
+def send_typing(chat_id):
+    url = f"{TELEGRAM_API_URL}/sendChatAction"
     requests.post(url, json={
         "chat_id": chat_id,
-        "text": text
+        "action": "typing"
     })
 
 
-# ✅ Webhook (main logic)
+# =========================
+# 🚀 MAIN WEBHOOK
+# =========================
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -108,29 +125,30 @@ def webhook():
         chat_id = message["chat"]["id"]
         text = message.get("text", "").lower()
 
-        # 👤 Extract user info
+        # 👤 Save user
         user_info = message.get("from", {})
         user_data = {
             "id": user_info.get("id"),
             "name": user_info.get("first_name"),
             "username": user_info.get("username")
         }
-
-        # 💾 Save user
         save_user(user_data)
 
-        # 🤖 Bot logic
+        # ⏳ Show typing
+        send_typing(chat_id)
+
+        # 🤖 Bot commands
         if text == "/start":
-            reply = "Hello! I'm your Chenura Ai Chat Bot Powered By Shadow Technologies. Ask me anything."
+            reply = "Hello! I'm Chenura AI Chat Bot 🤖\nPowered by Gemini 2.5.\nAsk me anything."
 
         elif text == "/users":
             if chat_id == ADMIN_ID:
                 count = get_user_count()
-                reply = f"Total users: {count}"
+                reply = f"👥 Total users: {count}"
             else:
-                reply = "Not allowed"
+                reply = "❌ Not allowed"
 
-        elif "hi" in text or "hello" in text:
+        elif text in ["hi", "hello"]:
             reply = "Hi there! How can I help you?"
 
         else:
@@ -141,13 +159,17 @@ def webhook():
     return "OK", 200
 
 
-# ✅ Health check route
+# =========================
+# ❤️ HEALTH CHECK
+# =========================
 @app.route("/", methods=["GET"])
 def home():
     return "Bot is running", 200
 
 
-# ✅ Run app (Render compatible)
+# =========================
+# ▶️ RUN APP
+# =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
