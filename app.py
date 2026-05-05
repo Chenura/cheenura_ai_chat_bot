@@ -12,6 +12,7 @@ app = Flask(__name__)
 # =========================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 MONGO_URI = os.environ.get("MONGO_URI")
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -39,10 +40,10 @@ def get_user_count():
 
 
 # =========================
-# 🤖 GEMINI AI (SAFE)
+# 🤖 GEMINI AI
 # =========================
 def get_gemini_response(user_message):
-    models = ["gemini-2.5-flash", "gemini-1.5-flash"]
+    models = ["gemini-2.5-flash", "gemini-1.5-pro"]
 
     data = {
         "contents": [{"parts": [{"text": user_message}]}]
@@ -51,118 +52,148 @@ def get_gemini_response(user_message):
     for model in models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
 
-        for attempt in range(2):
+        for attempt in range(3):
             try:
-                response = requests.post(url, json=data, timeout=10)
+                response = requests.post(url, json=data, timeout=15)
 
                 print(f"{model}:", response.status_code)
 
                 if response.status_code == 200:
                     result = response.json()
 
-                    if (
-                        "candidates" in result and
-                        len(result["candidates"]) > 0 and
-                        "content" in result["candidates"][0] and
-                        "parts" in result["candidates"][0]["content"]
-                    ):
+                    if "candidates" in result:
                         text = result["candidates"][0]["content"]["parts"][0].get("text", "")
-
-                        if text and text.strip():
+                        if text:
                             return text.strip()
 
-                elif response.status_code == 503:
-                    time.sleep(2)
+                elif response.status_code == 429:
+                    time.sleep(5)
 
             except Exception as e:
-                print("AI error:", e)
+                print("Gemini error:", e)
 
     return None
 
 
 # =========================
-# 🧠 INTELLIGENT FALLBACK
+# 🤖 OPENAI BACKUP
+# =========================
+def get_openai_response(user_message):
+    url = "https://api.openai.com/v1/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "user", "content": user_message}
+        ]
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=15)
+
+        if response.status_code == 200:
+            result = response.json()
+            return result["choices"][0]["message"]["content"].strip()
+
+        else:
+            print("OpenAI error:", response.text)
+
+    except Exception as e:
+        print("OpenAI exception:", e)
+
+    return None
+
+
+# =========================
+# 🧠 AI ROUTER
+# =========================
+def get_ai_response(text):
+    # Try Gemini
+    gemini = get_gemini_response(text)
+    if gemini:
+        return gemini
+
+    print("⚠️ Gemini failed → trying OpenAI")
+
+    # Try OpenAI
+    openai = get_openai_response(text)
+    if openai:
+        return openai
+
+    return None
+
+
+# =========================
+# 🧠 FALLBACK SYSTEM
 # =========================
 def fallback_response(text):
-    text_lower = text.lower()
+    t = text.lower()
 
-    if any(word in text_lower for word in ["hi", "hello", "hey"]):
-        return "Hello 👋 I'm Chenura AI Bot. Even if AI is busy, I can still help!"
+    if any(w in t for w in ["hi", "hello", "hey"]):
+        return "Hello 👋 I'm Chenura AI Bot. How can I help?"
 
-    elif "who are you" in text_lower or "your name" in text_lower:
-        return "🤖 I'm Chenura AI Chat Bot, built to help with coding, AI, and cybersecurity."
+    elif "who are you" in t:
+        return "🤖 I'm Chenura AI Chat Bot, built for coding, AI, and cybersecurity."
 
-    elif "what can you do" in text_lower or "help" in text_lower:
+    elif "what can you do" in t:
         return """🤖 I can help with:
 
-💻 Coding
-🛡 Cybersecurity
-🔧 Tools
+💻 Python code
+🛡 Cybersecurity tips
+🌐 Website checks
 
 Try:
 • python code
 • phishing tips
 • check website"""
 
-    elif "python" in text_lower or "code" in text_lower:
-        return """💻 Example Python Code:
+    elif "python" in t or "code" in t:
+        return """💻 Example:
 
 print("Hello World")
-
 for i in range(3):
-    print(i)
-"""
+    print(i)"""
 
-    elif "website" in text_lower or "url" in text_lower or "scan" in text_lower:
-        return """🔍 Website Safety Tips:
-
-✔ HTTPS 🔒  
-✔ Trusted domain  
-✔ No suspicious popups  
-"""
-
-    elif "phishing" in text_lower:
-        return """⚠️ Phishing Protection:
+    elif "phishing" in t:
+        return """⚠️ Phishing tips:
 
 • Don't click unknown links  
-• Verify sender  
-• Never share passwords  
-"""
+• Check sender  
+• Never share passwords"""
 
-    elif "how are you" in text_lower:
-        return "I'm doing great 🤖 (even without AI). How can I help you?"
+    elif "website" in t:
+        return """🔍 Website safety:
 
-    elif "what are the basic tasks" in text_lower:
-        return """⚙️ Basic tasks:
-
-👉 Coding help  
-👉 Security tips  
-👉 Website checks  
-"""
+✔ HTTPS  
+✔ Trusted domain  
+✔ No suspicious popups"""
 
     else:
-        return f"""⚠️ AI is currently busy.
+        return f"""⚠️ AI is busy right now.
 
 You said: "{text}"
 
 Try:
-👉 python code
-👉 phishing tips
-👉 check website"""
+• python code
+• phishing tips
+• check website"""
 
 
 # =========================
 # 🔁 BACKGROUND RETRY
 # =========================
-def retry_ai_later(chat_id, text):
+def retry_ai(chat_id, text):
     def task():
-        for _ in range(2):
-            time.sleep(3)
+        time.sleep(3)
 
-            ai_reply = get_gemini_response(text)
-            if ai_reply and ai_reply.strip():
-                send_message(chat_id, f"🤖 Update:\n\n{ai_reply}")
-                return
+        ai_reply = get_ai_response(text)
+        if ai_reply:
+            send_message(chat_id, f"🤖 Update:\n\n{ai_reply}")
 
     threading.Thread(target=task).start()
 
@@ -172,20 +203,12 @@ def retry_ai_later(chat_id, text):
 # =========================
 def send_message(chat_id, text):
     url = f"{TELEGRAM_API_URL}/sendMessage"
-
-    requests.post(url, json={
-        "chat_id": chat_id,
-        "text": text
-    })
+    requests.post(url, json={"chat_id": chat_id, "text": text})
 
 
 def send_typing(chat_id):
     url = f"{TELEGRAM_API_URL}/sendChatAction"
-
-    requests.post(url, json={
-        "chat_id": chat_id,
-        "action": "typing"
-    })
+    requests.post(url, json={"chat_id": chat_id, "action": "typing"})
 
 
 # =========================
@@ -222,17 +245,15 @@ def webhook():
         else:
             send_message(chat_id, "❌ Not allowed")
 
-    # =========================
-    # 🤖 AI + FALLBACK + RETRY
-    # =========================
+    # AI + fallback
     else:
-        ai_reply = get_gemini_response(text)
+        ai_reply = get_ai_response(text)
 
-        if ai_reply and ai_reply.strip():
+        if ai_reply:
             send_message(chat_id, ai_reply)
         else:
             send_message(chat_id, fallback_response(text))
-            retry_ai_later(chat_id, text)
+            retry_ai(chat_id, text)
 
     return "OK", 200
 
