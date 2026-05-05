@@ -15,6 +15,9 @@ if not GEMINI_API_KEY:
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
+# ✅ Store unique users
+users = set()
+
 
 # ✅ Webhook
 @app.route("/webhook", methods=["POST"])
@@ -29,10 +32,18 @@ def webhook():
     message = data.get("message")
     if message:
         chat_id = message["chat"]["id"]
+        user_id = message["from"]["id"]
         text = message.get("text", "")
 
+        # ✅ Track user
+        users.add(user_id)
+        print("Total users:", len(users))
+
         if text.lower() == "/start":
-            reply = "Hello! I'm your Gemini 2.5 AI assistant 🚀"
+            reply = f"Hello! I'm your Gemini 2.5 AI assistant 🚀\nUsers: {len(users)}"
+
+        elif text.lower() == "/users":
+            reply = f"👥 Total users: {len(users)}"
 
         elif "hi" in text.lower() or "hello" in text.lower():
             reply = "Hi there! How can I help you?"
@@ -48,8 +59,8 @@ def webhook():
 # ✅ Gemini with retry + fallback
 def get_gemini_response(user_message):
     models = [
-        "gemini-2.5-flash",  # primary
-        "gemini-pro"         # fallback
+        "gemini-2.5-flash",
+        "gemini-pro"
     ]
 
     for model in models:
@@ -66,7 +77,6 @@ def get_gemini_response(user_message):
 
             print(f"Trying model: {model}")
             print("Status:", response.status_code)
-            print("Response:", response.text)
 
             if response.status_code == 200:
                 result = response.json()
@@ -102,7 +112,7 @@ def send_message(chat_id, text):
 # ✅ Health check
 @app.route("/", methods=["GET"])
 def home():
-    return "Bot is running", 200
+    return f"Bot is running | Users: {len(users)}", 200
 
 
 # ✅ Run app
