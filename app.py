@@ -84,60 +84,66 @@ def get_gemini_response(user_message):
 # 🧠 INTELLIGENT FALLBACK
 # =========================
 def fallback_response(text):
-    text = text.lower()
+    text_lower = text.lower()
 
-    # Greeting
-    if any(word in text for word in ["hi", "hello", "hey"]):
-        return "Hello 👋 I’m running in smart basic mode. Try:\n• python code\n• phishing tips\n• website check"
+    if any(word in text_lower for word in ["hi", "hello", "hey"]):
+        return "Hello 👋 I'm Chenura AI Bot. Even if AI is busy, I can still help!"
 
-    # Help / capability
-    elif "help" in text or "what can you do" in text:
-        return """🤖 Available features:
+    elif "who are you" in text_lower or "your name" in text_lower:
+        return "🤖 I'm Chenura AI Chat Bot, built to help with coding, AI, and cybersecurity."
+
+    elif "what can you do" in text_lower or "help" in text_lower:
+        return """🤖 I can help with:
 
 💻 Coding
-- Simple Python scripts
-
 🛡 Cybersecurity
-- Phishing detection tips
-- Website safety checks
-
 🔧 Tools
-- Basic vulnerability scan
 
-⚠️ AI is temporarily busy, but core features are active."""
+Try:
+• python code
+• phishing tips
+• check website"""
 
-    # Python
-    elif "python" in text:
+    elif "python" in text_lower or "code" in text_lower:
         return """💻 Example Python Code:
 
-print("Happy Birthday 🎉")
+print("Hello World")
 
-for i in range(5):
+for i in range(3):
     print(i)
 """
 
-    # Website / scan
-    elif "website" in text or "scan" in text or "url" in text:
-        return """🔍 Website Safety Check:
+    elif "website" in text_lower or "url" in text_lower or "scan" in text_lower:
+        return """🔍 Website Safety Tips:
 
-✔ HTTPS enabled?
-✔ Trusted domain?
-✔ No suspicious popups?
+✔ HTTPS 🔒  
+✔ Trusted domain  
+✔ No suspicious popups  
+"""
 
-⚠️ Never enter passwords on unknown sites."""
+    elif "phishing" in text_lower:
+        return """⚠️ Phishing Protection:
 
-    # Phishing
-    elif "phishing" in text:
-        return """⚠️ Phishing Tips:
-
-• Check sender carefully  
-• Avoid unknown links  
+• Don't click unknown links  
+• Verify sender  
 • Never share passwords  
-• Look for HTTPS 🔒"""
+"""
 
-    # Default
+    elif "how are you" in text_lower:
+        return "I'm doing great 🤖 (even without AI). How can I help you?"
+
+    elif "what are the basic tasks" in text_lower:
+        return """⚙️ Basic tasks:
+
+👉 Coding help  
+👉 Security tips  
+👉 Website checks  
+"""
+
     else:
-        return """⚠️ AI is busy right now.
+        return f"""⚠️ AI is currently busy.
+
+You said: "{text}"
 
 Try:
 👉 python code
@@ -150,7 +156,7 @@ Try:
 # =========================
 def retry_ai_later(chat_id, text):
     def task():
-        for _ in range(2):  # retry twice
+        for _ in range(2):
             time.sleep(3)
 
             ai_reply = get_gemini_response(text)
@@ -225,10 +231,7 @@ def webhook():
         if ai_reply and ai_reply.strip():
             send_message(chat_id, ai_reply)
         else:
-            # ⚡ instant fallback
             send_message(chat_id, fallback_response(text))
-
-            # 🔁 retry in background
             retry_ai_later(chat_id, text)
 
     return "OK", 200
