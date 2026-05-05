@@ -7,18 +7,11 @@ from pymongo import MongoClient
 app = Flask(__name__)
 
 # =========================
-# 🔐 ENV VARIABLES
+# 🔐 ENV
 # =========================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 MONGO_URI = os.environ.get("MONGO_URI")
-
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not set")
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY not set")
-if not MONGO_URI:
-    raise ValueError("MONGO_URI not set")
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -45,7 +38,7 @@ def get_user_count():
 
 
 # =========================
-# 📢 BROADCAST SYSTEM
+# 📢 BROADCAST
 # =========================
 def broadcast_message(text):
     users = users_collection.find()
@@ -57,13 +50,13 @@ def broadcast_message(text):
             success += 1
             time.sleep(0.05)
         except Exception as e:
-            print("Broadcast failed:", user["id"], e)
+            print("Broadcast error:", e)
 
     return success
 
 
 # =========================
-# 🤖 GEMINI AI
+# 🤖 GEMINI (STRICT)
 # =========================
 def get_gemini_response(user_message):
     models = ["gemini-2.5-flash", "gemini-1.5-flash"]
@@ -83,7 +76,18 @@ def get_gemini_response(user_message):
 
                 if response.status_code == 200:
                     result = response.json()
-                    return result["candidates"][0]["content"]["parts"][0]["text"]
+
+                    # ✅ STRICT VALIDATION
+                    if (
+                        "candidates" in result and
+                        len(result["candidates"]) > 0 and
+                        "content" in result["candidates"][0] and
+                        "parts" in result["candidates"][0]["content"]
+                    ):
+                        text = result["candidates"][0]["content"]["parts"][0].get("text", "")
+
+                        if text and text.strip():
+                            return text.strip()
 
                 elif response.status_code == 503:
                     time.sleep(2)
@@ -91,20 +95,32 @@ def get_gemini_response(user_message):
             except Exception as e:
                 print("AI error:", e)
 
-    return None
+    return None  # force fallback
 
 
 # =========================
-# 🧠 FALLBACK SYSTEM
+# 🧠 FALLBACK (SMART)
 # =========================
 def fallback_response(text):
-    if "python" in text:
-        return """🎂 Simple Python Birthday Code:
+    text = text.lower()
 
-name = input("Enter your name: ")
-print("Happy Birthday", name, "🎉")
+    if "python" in text:
+        return """💻 Simple Python Code:
+
+print("Happy Birthday 🎉")
 """
-    return "⚠️ AI is busy right now. Try again shortly."
+
+    elif "website" in text or "scan" in text:
+        return "🔍 Basic check: Ensure the site uses HTTPS and is trusted."
+
+    elif "phishing" in text:
+        return "⚠️ Avoid suspicious links. Never enter passwords on unknown sites."
+
+    elif "hi" in text or "hello" in text:
+        return "Hello! 👋 I'm still here even if AI is busy."
+
+    else:
+        return "⚠️ AI is currently overloaded, but I can still help with basic tasks."
 
 
 # =========================
@@ -179,22 +195,20 @@ def webhook():
         "username": user.get("username")
     })
 
-    # ⏳ Typing
     send_typing(chat_id)
 
     # =========================
-    # 📢 BROADCAST COMMAND
+    # 📢 BROADCAST
     # =========================
     if text.startswith("/broadcast"):
         if chat_id != ADMIN_ID:
             send_message(chat_id, "❌ Not allowed")
         else:
             msg = text.replace("/broadcast", "").strip()
-
             if not msg:
-                send_message(chat_id, "⚠️ Usage:\n/broadcast Your message")
+                send_message(chat_id, "⚠️ Usage: /broadcast message")
             else:
-                send_message(chat_id, "📢 Sending broadcast...")
+                send_message(chat_id, "📢 Sending...")
                 count = broadcast_message(msg)
                 send_message(chat_id, f"✅ Sent to {count} users")
 
@@ -235,12 +249,12 @@ def webhook():
             send_message(chat_id, "❌ Not allowed")
 
     # =========================
-    # 🤖 AI
+    # 🤖 AI + FALLBACK (FIXED)
     # =========================
     else:
         ai_reply = get_gemini_response(text)
 
-        if ai_reply:
+        if ai_reply is not None and ai_reply.strip() != "":
             send_message(chat_id, ai_reply)
         else:
             send_message(chat_id, fallback_response(text))
