@@ -32,7 +32,7 @@ def webhook():
         text = message.get("text", "")
 
         if text.lower() == "/start":
-            reply = "Hello! I'm your Gemini 2.5 AI assistant. Ask me anything."
+            reply = "Hello! I'm your Gemini 2.5 AI assistant 🚀"
 
         elif "hi" in text.lower() or "hello" in text.lower():
             reply = "Hi there! How can I help you?"
@@ -45,7 +45,7 @@ def webhook():
     return "OK", 200
 
 
-# ✅ Gemini 2.5 function (UPDATED)
+# ✅ Gemini 2.5 (CORRECT + SAFE)
 def get_gemini_response(user_message):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
 
@@ -64,17 +64,21 @@ def get_gemini_response(user_message):
     }
 
     try:
-        response = requests.post(url, headers=headers, json=data)
+        response = requests.post(url, headers=headers, json=data, timeout=20)
 
         print("Gemini status:", response.status_code)
         print("Gemini response:", response.text)
 
         if response.status_code != 200:
-            return "Error: Gemini API failed. Check logs."
+            return f"Gemini error: {response.status_code}"
 
         result = response.json()
 
-        return result["candidates"][0]["content"]["parts"][0]["text"]
+        # ✅ SAFE PARSING (prevents crashes)
+        if "candidates" in result and len(result["candidates"]) > 0:
+            return result["candidates"][0]["content"]["parts"][0]["text"]
+
+        return "No response from Gemini."
 
     except Exception as e:
         print("Exception:", str(e))
@@ -84,10 +88,14 @@ def get_gemini_response(user_message):
 # ✅ Send message
 def send_message(chat_id, text):
     url = f"{TELEGRAM_API_URL}/sendMessage"
-    requests.post(url, json={
-        "chat_id": chat_id,
-        "text": text
-    })
+
+    try:
+        requests.post(url, json={
+            "chat_id": chat_id,
+            "text": text
+        })
+    except Exception as e:
+        print("Telegram send error:", str(e))
 
 
 # ✅ Health check
@@ -96,7 +104,7 @@ def home():
     return "Bot is running", 200
 
 
-# ✅ Render port
-if name == "__main__":
+# ✅ IMPORTANT FIX
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
