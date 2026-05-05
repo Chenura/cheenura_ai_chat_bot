@@ -5,6 +5,8 @@ import os
 app = Flask(__name__)
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 
@@ -20,26 +22,56 @@ def webhook():
     message = data.get("message")
     if message:
         chat_id = message["chat"]["id"]
-        text = message.get("text", "").lower()
+        text = message.get("text", "")
 
-        # ✅ Command handling
-        if text == "/start":
-            reply = "Hello! I'm your AI assistant bot. Ask me anything."
+        # Basic commands
+        if text.lower() == "/start":
+            reply = "Hello! I'm your Gemini AI bot. Ask me anything."
 
-        elif text == "hi" or text == "hello":
+        elif "hi" in text.lower() or "hello" in text.lower():
             reply = "Hi there! How can I help you?"
 
-        elif "name" in text:
-            reply = "I'm your AI chatbot built with Python and Flask."
-
         else:
-            reply = "I understand your message, but I'm not fully trained yet."
+            reply = get_gemini_response(text)
 
         send_message(chat_id, reply)
 
     return "OK", 200
 
 
+# ✅ Gemini API function
+def get_gemini_response(user_message):
+    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key={GEMINI_API_KEY}"
+
+    headers = {
+        "Content-Type": "application/json"
+    }
+
+    data = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": user_message}
+                ]
+            }
+        ]
+    }
+
+    response = requests.post(url, headers=headers, json=data)
+
+    if response.status_code != 200:
+        print("Gemini Error:", response.text)
+        return "Error: Gemini AI not working."
+
+    result = response.json()
+
+    try:
+        return result["candidates"][0]["content"]["parts"][0]["text"]
+    except:
+        return "Error: Unexpected Gemini response."
+
+
+# Send message to Telegram
 def send_message(chat_id, text):
     url = f"{TELEGRAM_API_URL}/sendMessage"
     requests.post(url, json={
