@@ -32,7 +32,7 @@ def webhook():
         text = message.get("text", "")
 
         if text.lower() == "/start":
-            reply = "Hello! I'm your Gemini 2.5 AI assistant. Ask me anything."
+            reply = "Hello! I'm your Gemini 2.5 AI assistant 🚀"
 
         elif "hi" in text.lower() or "hello" in text.lower():
             reply = "Hi there! How can I help you?"
@@ -45,49 +45,58 @@ def webhook():
     return "OK", 200
 
 
-# ✅ Gemini 2.5 function
+# ✅ Gemini with retry + fallback
 def get_gemini_response(user_message):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    models = [
+        "gemini-2.5-flash",  # primary
+        "gemini-pro"         # fallback
+    ]
 
-    headers = {
-        "Content-Type": "application/json"
-    }
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
 
-    data = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": user_message}
-                ]
-            }
-        ]
-    }
+        try:
+            response = requests.post(
+                url,
+                json={
+                    "contents": [{"parts": [{"text": user_message}]}]
+                },
+                timeout=20
+            )
 
-    try:
-        response = requests.post(url, headers=headers, json=data)
+            print(f"Trying model: {model}")
+            print("Status:", response.status_code)
+            print("Response:", response.text)
 
-        print("Gemini status:", response.status_code)
-        print("Gemini response:", response.text)
+            if response.status_code == 200:
+                result = response.json()
 
-        if response.status_code != 200:
-            return "Error: Gemini API failed. Check logs."
+                if "candidates" in result:
+                    return result["candidates"][0]["content"]["parts"][0]["text"]
 
-        result = response.json()
+            elif response.status_code == 503:
+                print(f"{model} overloaded, trying next...")
 
-        return result["candidates"][0]["content"]["parts"][0]["text"]
+            elif response.status_code == 429:
+                return "⚠️ Daily limit reached. Try again tomorrow."
 
-    except Exception as e:
-        print("Exception:", str(e))
-        return "Error: Gemini crashed."
+        except Exception as e:
+            print("Error:", str(e))
+
+    return "⚠️ AI is busy right now. Please try again in a moment."
 
 
 # ✅ Send message
 def send_message(chat_id, text):
     url = f"{TELEGRAM_API_URL}/sendMessage"
-    requests.post(url, json={
-        "chat_id": chat_id,
-        "text": text
-    })
+
+    try:
+        requests.post(url, json={
+            "chat_id": chat_id,
+            "text": text
+        })
+    except Exception as e:
+        print("Telegram send error:", str(e))
 
 
 # ✅ Health check
@@ -96,7 +105,7 @@ def home():
     return "Bot is running", 200
 
 
-# ✅ FIXED HERE
+# ✅ Run app
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
