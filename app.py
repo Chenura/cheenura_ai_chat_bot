@@ -4,74 +4,53 @@ import os
 
 app = Flask(__name__)
 
-# 🔐 ENV VARIABLES (SET THESE IN RENDER)
-TOKEN = os.getenv("TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Load bot token from environment
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN is not set in environment variables")
 
-# 🤖 Gemini AI function (UPDATED)
-def ask_gemini(prompt):
-    url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-    headers = {
-        "Content-Type": "application/json"
-    }
 
-    data = {
-        "contents": [
-            {
-                "parts": [{"text": prompt}]
-            }
-        ]
-    }
-
-    try:
-        response = requests.post(url, headers=headers, json=data)
-        result = response.json()
-
-        return result["candidates"][0]["content"]["parts"][0]["text"]
-
-    except Exception as e:
-        print("Gemini Error:", e)
-        return "⚠️ AI is busy, try again later."
-
-# 🏠 Home route (for Render check)
-@app.route('/')
-def home():
-    return "🤖 Bot is running!"
-
-# 📩 Telegram webhook
-@app.route('/webhook', methods=['POST'])
+# ✅ Webhook route (must match your Telegram webhook)
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
 
-    if "message" in data:
-        chat_id = data["message"]["chat"]["id"]
-        user_text = data["message"].get("text", "")
+    if not data:
+        return "No data", 400
 
-        # ⏳ Optional: typing effect
-        requests.post(f"https://api.telegram.org/bot{TOKEN}/sendChatAction", json={
-            "chat_id": chat_id,
-            "action": "typing"
-        })
+    print("Incoming update:", data)
 
-        # 🤖 Get AI reply
-        reply = ask_gemini(user_text)
+    message = data.get("message")
+    if message:
+        chat_id = message["chat"]["id"]
+        text = message.get("text", "")
 
-        # 🛑 Fallback if error
-        if not reply or "error" in reply.lower():
-            reply = "🤖 I'm having trouble right now. Try again later."
+        reply = f"You said: {text}"
+        send_message(chat_id, reply)
 
-        # 📤 Send message
-        requests.post(TELEGRAM_URL, json={
-            "chat_id": chat_id,
-            "text": reply
-        })
-
-    return "ok"
+    return "OK", 200
 
 
-# 🚀 Run locally (Render uses gunicorn)
+# ✅ Send message function
+def send_message(chat_id, text):
+    url = f"{TELEGRAM_API_URL}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text
+    }
+    requests.post(url, json=payload)
+
+
+# ✅ Health check route (Render uses this)
+@app.route("/", methods=["GET"])
+def home():
+    return "Bot is running", 200
+
+
+# ✅ IMPORTANT: Use Render's dynamic port
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
