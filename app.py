@@ -33,12 +33,10 @@ ADMIN_ID = 1294323193
 
 
 # =========================
-# 👤 USER FUNCTIONS
+# 👤 USER SYSTEM
 # =========================
 def save_user(user):
-    if not user.get("id"):
-        return
-    if not users_collection.find_one({"id": user["id"]}):
+    if user.get("id") and not users_collection.find_one({"id": user["id"]}):
         users_collection.insert_one(user)
 
 
@@ -47,20 +45,31 @@ def get_user_count():
 
 
 # =========================
-# 🤖 GEMINI (2.5 + FALLBACK)
+# 📢 BROADCAST SYSTEM
+# =========================
+def broadcast_message(text):
+    users = users_collection.find()
+    success = 0
+
+    for user in users:
+        try:
+            send_message(user["id"], text)
+            success += 1
+            time.sleep(0.05)
+        except Exception as e:
+            print("Broadcast failed:", user["id"], e)
+
+    return success
+
+
+# =========================
+# 🤖 GEMINI AI
 # =========================
 def get_gemini_response(user_message):
-    models = [
-        "gemini-2.5-flash",   # primary
-        "gemini-1.5-flash"    # fallback
-    ]
+    models = ["gemini-2.5-flash", "gemini-1.5-flash"]
 
     data = {
-        "contents": [
-            {
-                "parts": [{"text": user_message}]
-            }
-        ]
+        "contents": [{"parts": [{"text": user_message}]}]
     }
 
     for model in models:
@@ -70,36 +79,49 @@ def get_gemini_response(user_message):
             try:
                 response = requests.post(url, json=data)
 
-                print(f"Model: {model}, Status:", response.status_code)
+                print(f"{model}:", response.status_code)
 
                 if response.status_code == 200:
                     result = response.json()
-
-                    if "candidates" in result:
-                        return result["candidates"][0]["content"]["parts"][0]["text"]
+                    return result["candidates"][0]["content"]["parts"][0]["text"]
 
                 elif response.status_code == 503:
                     time.sleep(2)
 
-                else:
-                    break
-
             except Exception as e:
-                print("Error:", e)
-                break
+                print("AI error:", e)
 
-    return "⚠️ AI is currently overloaded. Please try again in a moment."
+    return None
 
 
 # =========================
-# 📤 TELEGRAM FUNCTIONS
+# 🧠 FALLBACK SYSTEM
 # =========================
-def send_message(chat_id, text):
+def fallback_response(text):
+    if "python" in text:
+        return """🎂 Simple Python Birthday Code:
+
+name = input("Enter your name: ")
+print("Happy Birthday", name, "🎉")
+"""
+    return "⚠️ AI is busy right now. Try again shortly."
+
+
+# =========================
+# 📤 TELEGRAM
+# =========================
+def send_message(chat_id, text, reply_markup=None):
     url = f"{TELEGRAM_API_URL}/sendMessage"
-    requests.post(url, json={
+
+    payload = {
         "chat_id": chat_id,
         "text": text
-    })
+    }
+
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+
+    requests.post(url, json=payload)
 
 
 def send_typing(chat_id):
@@ -111,62 +133,127 @@ def send_typing(chat_id):
 
 
 # =========================
+# 🎛 UI MENUS
+# =========================
+def main_menu():
+    return {
+        "keyboard": [
+            ["💬 Ask AI"],
+            ["🛠 Tools"],
+            ["ℹ️ Help"]
+        ],
+        "resize_keyboard": True
+    }
+
+
+def tools_menu():
+    return {
+        "keyboard": [
+            ["🔍 Phishing Check"],
+            ["🛡 Vulnerability Scan"],
+            ["🔙 Back"]
+        ],
+        "resize_keyboard": True
+    }
+
+
+# =========================
 # 🚀 WEBHOOK
 # =========================
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
 
-    if not data:
-        return "No data", 400
-
-    print("Incoming:", data)
-
     message = data.get("message")
+    if not message:
+        return "OK", 200
 
-    if message:
-        chat_id = message["chat"]["id"]
-        text = message.get("text", "").lower()
+    chat_id = message["chat"]["id"]
+    text = message.get("text", "")
 
-        # 👤 Save user
-        user_info = message.get("from", {})
-        user_data = {
-            "id": user_info.get("id"),
-            "name": user_info.get("first_name"),
-            "username": user_info.get("username")
-        }
-        save_user(user_data)
+    # 👤 Save user
+    user = message.get("from", {})
+    save_user({
+        "id": user.get("id"),
+        "name": user.get("first_name"),
+        "username": user.get("username")
+    })
 
-        # ⏳ Typing indicator
-        send_typing(chat_id)
+    # ⏳ Typing
+    send_typing(chat_id)
 
-        # 🤖 Commands
-        if text == "/start":
-            reply = "Hello! I'm Chenura AI Chat Bot 🤖\nPowered by Gemini 2.5.\nAsk me anything."
-
-        elif text == "/users":
-            if chat_id == ADMIN_ID:
-                reply = f"👥 Total users: {get_user_count()}"
-            else:
-                reply = "❌ Not allowed"
-
-        elif text in ["hi", "hello"]:
-            reply = "Hi there! How can I help you?"
-
+    # =========================
+    # 📢 BROADCAST COMMAND
+    # =========================
+    if text.startswith("/broadcast"):
+        if chat_id != ADMIN_ID:
+            send_message(chat_id, "❌ Not allowed")
         else:
-            reply = get_gemini_response(text)
+            msg = text.replace("/broadcast", "").strip()
 
-        send_message(chat_id, reply)
+            if not msg:
+                send_message(chat_id, "⚠️ Usage:\n/broadcast Your message")
+            else:
+                send_message(chat_id, "📢 Sending broadcast...")
+                count = broadcast_message(msg)
+                send_message(chat_id, f"✅ Sent to {count} users")
+
+    # =========================
+    # 🎛 UI
+    # =========================
+    elif text == "/start":
+        send_message(chat_id, "Welcome to Chenura AI Bot 🤖", main_menu())
+
+    elif text == "💬 Ask AI":
+        send_message(chat_id, "Ask me anything 🤖")
+
+    elif text == "🛠 Tools":
+        send_message(chat_id, "Select a tool:", tools_menu())
+
+    elif text == "ℹ️ Help":
+        send_message(chat_id, "I can help with coding, AI, cybersecurity.")
+
+    elif text == "🔙 Back":
+        send_message(chat_id, "Back to menu", main_menu())
+
+    # =========================
+    # 🛡 TOOLS
+    # =========================
+    elif text == "🔍 Phishing Check":
+        send_message(chat_id, "Send a URL to check.")
+
+    elif text == "🛡 Vulnerability Scan":
+        send_message(chat_id, "Send a website.")
+
+    # =========================
+    # 📊 ADMIN
+    # =========================
+    elif text == "/users":
+        if chat_id == ADMIN_ID:
+            send_message(chat_id, f"👥 Users: {get_user_count()}")
+        else:
+            send_message(chat_id, "❌ Not allowed")
+
+    # =========================
+    # 🤖 AI
+    # =========================
+    else:
+        ai_reply = get_gemini_response(text)
+
+        if ai_reply:
+            send_message(chat_id, ai_reply)
+        else:
+            send_message(chat_id, fallback_response(text))
 
     return "OK", 200
 
 
 # =========================
-# ❤️ HEALTH CHECK
+# ❤️ HEALTH
 # =========================
-@app.route("/", methods=["GET"])
+@app.route("/")
 def home():
-    return "Bot is running", 200
+    return "Bot is running"
 
 
 # =========================
