@@ -16,6 +16,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY")
 
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+ADMIN_TELEGRAM_ID = int(os.environ.get("ADMIN_TELEGRAM_ID"))
 
 app.secret_key = SECRET_KEY
 
@@ -126,6 +127,8 @@ def webhook():
 
     save_user(user_id, username)
 
+    # ================= COMMANDS =================
+
     if text == "/start":
         reply = """🤖 Welcome to Chenura AI Bot
 
@@ -135,6 +138,13 @@ def webhook():
 📊 Check usage:
 /myusage
 """
+
+    elif text == "/users":
+        if user_id == ADMIN_TELEGRAM_ID:
+            total_users = users.count_documents({})
+            reply = f"👥 Total users: {total_users}"
+        else:
+            reply = "❌ You are not allowed to use this command"
 
     elif text == "/setkey":
         reply = (
@@ -188,7 +198,7 @@ def login():
     """
 
 # =========================
-# 📊 DASHBOARD (MODERN UI)
+# 📊 DASHBOARD
 # =========================
 @app.route("/dashboard")
 def dashboard():
