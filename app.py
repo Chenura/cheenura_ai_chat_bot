@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, redirect, session
 import requests
 import os
 from pymongo import MongoClient
@@ -12,14 +12,17 @@ app = Flask(__name__)
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 MONGO_URI = os.environ.get("MONGO_URI")
 ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY")
+SECRET_KEY = os.environ.get("SECRET_KEY")
 
-if not BOT_TOKEN or not MONGO_URI or not ENCRYPTION_KEY:
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+
+if not BOT_TOKEN or not MONGO_URI or not ENCRYPTION_KEY or not SECRET_KEY:
     raise ValueError("Missing environment variables")
 
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+app.secret_key = SECRET_KEY
 
-# 👉 YOUR TELEGRAM ID
-ADMIN_ID = 1294323193
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 # =========================
 # 🔐 ENCRYPTION
@@ -40,39 +43,29 @@ db = client["telegram_bot"]
 users = db["users"]
 
 # =========================
-# 👤 USER SYSTEM
+# 👤 USER FUNCTIONS
 # =========================
 def save_user(user_id):
     users.update_one(
         {"user_id": user_id},
-        {"$setOnInsert": {
-            "requests": 0
-        }},
+        {"$setOnInsert": {"requests": 0}},
         upsert=True
     )
 
 def save_api_key(user_id, api_key):
-    encrypted = encrypt_key(api_key)
-
     users.update_one(
         {"user_id": user_id},
-        {"$set": {"gemini_key": encrypted}},
-        upsert=True
+        {"$set": {"gemini_key": encrypt_key(api_key)}}
     )
 
-def get_user_api_key(user_id):
+def get_api_key(user_id):
     user = users.find_one({"user_id": user_id})
-
     if user and user.get("gemini_key"):
         return decrypt_key(user["gemini_key"])
-
     return None
 
 def increment_usage(user_id):
-    users.update_one(
-        {"user_id": user_id},
-        {"$inc": {"requests": 1}}
-    )
+    users.update_one({"user_id": user_id}, {"$inc": {"requests": 1}})
 
 # =========================
 # 🤖 GEMINI AI
@@ -81,22 +74,20 @@ def get_gemini_response(text, api_key):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
 
     try:
-        response = requests.post(
+        res = requests.post(
             url,
-            json={
-                "contents": [{"parts": [{"text": text}]}]
-            },
+            json={"contents": [{"parts": [{"text": text}]}]},
             timeout=20
         )
 
-        if response.status_code == 200:
-            result = response.json()
-            return result["candidates"][0]["content"]["parts"][0]["text"]
+        if res.status_code == 200:
+            data = res.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
 
-        elif response.status_code == 429:
-            return "⚠️ Your API limit reached."
+        elif res.status_code == 429:
+            return "⚠️ API limit reached."
 
-        elif response.status_code == 503:
+        elif res.status_code == 503:
             return "⚠️ AI is busy. Try again."
 
         else:
@@ -104,16 +95,19 @@ def get_gemini_response(text, api_key):
 
     except Exception as e:
         print("AI error:", e)
-        return "⚠️ Failed to connect AI."
+        return "⚠️ Connection failed."
 
 # =========================
 # 📤 TELEGRAM
 # =========================
 def send_message(chat_id, text):
-    requests.post(
-        f"{TELEGRAM_API_URL}/sendMessage",
-        json={"chat_id": chat_id, "text": text}
-    )
+    try:
+        requests.post(
+            f"{TELEGRAM_API_URL}/sendMessage",
+            json={"chat_id": chat_id, "text": text}
+        )
+    except Exception as e:
+        print("Telegram error:", e)
 
 # =========================
 # 🚀 WEBHOOK
@@ -132,9 +126,6 @@ def webhook():
 
     save_user(user_id)
 
-    # =========================
-    # COMMANDS
-    # =========================
     if text == "/start":
         reply = """🤖 Welcome to Chenura AI Bot
 
@@ -160,20 +151,13 @@ def webhook():
     elif text == "/myusage":
         user = users.find_one({"user_id": user_id})
         used = user.get("requests", 0) if user else 0
-        reply = f"📊 Total requests: {used}"
-
-    elif text == "/users":
-        if user_id == ADMIN_ID:
-            count = users.count_documents({})
-            reply = f"👥 Total users: {count}"
-        else:
-            reply = "❌ Not allowed"
+        reply = f"📊 Your usage: {used}"
 
     else:
-        api_key = get_user_api_key(user_id)
+        api_key = get_api_key(user_id)
 
         if not api_key:
-            reply = "🔑 Please set your API key first using /setkey"
+            reply = "🔑 Please set your API key using /setkey"
         else:
             reply = get_gemini_response(text, api_key)
             increment_usage(user_id)
@@ -182,35 +166,62 @@ def webhook():
     return "OK", 200
 
 # =========================
+# 🔐 LOGIN
+# =========================
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+
+        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            session["admin"] = True
+            return redirect("/dashboard")
+
+        return "❌ Invalid credentials"
+
+    return """
+    <h2>🔐 Admin Login</h2>
+    <form method="POST">
+        Username:<br><input name="username"><br><br>
+        Password:<br><input name="password" type="password"><br><br>
+        <button type="submit">Login</button>
+    </form>
+    """
+
+# =========================
 # 📊 DASHBOARD
 # =========================
 @app.route("/dashboard")
 def dashboard():
-    if request.args.get("admin") != str(ADMIN_ID):
-        return "❌ Unauthorized"
+    if not session.get("admin"):
+        return redirect("/login")
 
     total_users = users.count_documents({})
     total_requests = sum(u.get("requests", 0) for u in users.find())
 
-    html = f"""
-    <h1>📊 Dashboard</h1>
-    <p>Users: {total_users}</p>
-    <p>Total Requests: {total_requests}</p>
-    <h3>Users:</h3><ul>
+    return f"""
+    <h1>📊 Admin Dashboard</h1>
+    <p>👥 Users: {total_users}</p>
+    <p>⚡ Total Requests: {total_requests}</p>
+    <br>
+    <a href="/logout">Logout</a>
     """
 
-    for u in users.find().limit(20):
-        html += f"<li>{u['user_id']} - {u.get('requests',0)} requests</li>"
-
-    html += "</ul>"
-    return html
+# =========================
+# 🚪 LOGOUT
+# =========================
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
 
 # =========================
-# ❤️ HEALTH
+# ❤️ HOME
 # =========================
 @app.route("/")
 def home():
-    return "Bot running"
+    return "Bot running", 200
 
 # =========================
 # ▶ RUN
