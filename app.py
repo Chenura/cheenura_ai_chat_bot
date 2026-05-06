@@ -17,9 +17,6 @@ SECRET_KEY = os.environ.get("SECRET_KEY")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 
-if not BOT_TOKEN or not MONGO_URI or not ENCRYPTION_KEY or not SECRET_KEY:
-    raise ValueError("Missing environment variables")
-
 app.secret_key = SECRET_KEY
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -43,12 +40,15 @@ db = client["telegram_bot"]
 users = db["users"]
 
 # =========================
-# 👤 USER FUNCTIONS
+# 👤 USER SYSTEM
 # =========================
-def save_user(user_id):
+def save_user(user_id, username):
     users.update_one(
         {"user_id": user_id},
-        {"$setOnInsert": {"requests": 0}},
+        {
+            "$set": {"username": username},
+            "$setOnInsert": {"requests": 0}
+        },
         upsert=True
     )
 
@@ -88,10 +88,9 @@ def get_gemini_response(text, api_key):
             return "⚠️ API limit reached."
 
         elif res.status_code == 503:
-            return "⚠️ AI is busy. Try again."
+            return "⚠️ AI busy."
 
-        else:
-            return "⚠️ AI error."
+        return "⚠️ AI error."
 
     except Exception as e:
         print("AI error:", e)
@@ -122,9 +121,10 @@ def webhook():
 
     chat_id = message["chat"]["id"]
     user_id = message["from"]["id"]
+    username = message["from"].get("username", "NoUsername")
     text = message.get("text", "")
 
-    save_user(user_id)
+    save_user(user_id, username)
 
     if text == "/start":
         reply = """🤖 Welcome to Chenura AI Bot
@@ -140,7 +140,7 @@ def webhook():
         reply = (
             "🔑 Get your Gemini API key:\n"
             "https://aistudio.google.com/app/apikey\n\n"
-            "Then send:\nkey: YOUR_API_KEY"
+            "Send:\nkey: YOUR_API_KEY"
         )
 
     elif text.lower().startswith("key:"):
@@ -171,10 +171,8 @@ def webhook():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
-
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        if (request.form.get("username") == ADMIN_USERNAME and
+            request.form.get("password") == ADMIN_PASSWORD):
             session["admin"] = True
             return redirect("/dashboard")
 
@@ -184,13 +182,13 @@ def login():
     <h2>🔐 Admin Login</h2>
     <form method="POST">
         Username:<br><input name="username"><br><br>
-        Password:<br><input name="password" type="password"><br><br>
-        <button type="submit">Login</button>
+        Password:<br><input type="password" name="password"><br><br>
+        <button>Login</button>
     </form>
     """
 
 # =========================
-# 📊 DASHBOARD
+# 📊 DASHBOARD (MODERN UI)
 # =========================
 @app.route("/dashboard")
 def dashboard():
@@ -200,12 +198,67 @@ def dashboard():
     total_users = users.count_documents({})
     total_requests = sum(u.get("requests", 0) for u in users.find())
 
+    rows = ""
+    for u in users.find().sort("requests", -1).limit(20):
+        rows += f"""
+        <tr>
+            <td>{u.get('user_id')}</td>
+            <td>{u.get('username')}</td>
+            <td>{u.get('requests',0)}</td>
+        </tr>
+        """
+
     return f"""
-    <h1>📊 Admin Dashboard</h1>
-    <p>👥 Users: {total_users}</p>
-    <p>⚡ Total Requests: {total_requests}</p>
-    <br>
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            body {{background:#0f172a;color:white;font-family:Arial;padding:20px}}
+            .card {{background:#1e293b;padding:20px;border-radius:10px;margin-bottom:20px}}
+            table {{width:100%;border-collapse:collapse}}
+            th,td {{padding:10px;border-bottom:1px solid #334155}}
+            tr:hover {{background:#334155}}
+        </style>
+    </head>
+    <body>
+
+    <h1>📊 Dashboard</h1>
+
+    <div class="card">
+        <p>👥 Users: {total_users}</p>
+        <p>⚡ Requests: {total_requests}</p>
+    </div>
+
+    <div class="card">
+        <canvas id="chart"></canvas>
+    </div>
+
+    <div class="card">
+        <h2>Top Users</h2>
+        <table>
+            <tr><th>ID</th><th>Username</th><th>Requests</th></tr>
+            {rows}
+        </table>
+    </div>
+
     <a href="/logout">Logout</a>
+
+    <script>
+        new Chart(document.getElementById("chart"), {{
+            type: "bar",
+            data: {{
+                labels: ["Users","Requests"],
+                datasets: [{{
+                    label:"Stats",
+                    data:[{total_users},{total_requests}]
+                }}]
+            }}
+        }});
+    </script>
+
+    </body>
+    </html>
     """
 
 # =========================
