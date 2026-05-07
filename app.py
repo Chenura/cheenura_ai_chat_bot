@@ -1,3 +1,6 @@
+# Fixed app.py
+
+```python
 from flask import Flask, request, redirect, session
 import requests
 import os
@@ -17,10 +20,10 @@ SECRET_KEY = os.environ.get("SECRET_KEY")
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 
-# Telegram Admin ID
-ADMIN_TELEGRAM_ID = int(os.environ.get("ADMIN_TELEGRAM_ID"))
+# Safe admin telegram id
+ADMIN_TELEGRAM_ID = os.environ.get("ADMIN_TELEGRAM_ID", "0")
 
-app.secret_key = SECRET_KEY
+app.secret_key = SECRET_KEY or "supersecret"
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -45,6 +48,7 @@ client = MongoClient(MONGO_URI)
 db = client["telegram_bot"]
 users = db["users"]
 
+
 # =========================
 # 👤 USER SYSTEM
 # =========================
@@ -59,20 +63,31 @@ def save_user(user_id, username):
     )
 
 
+
 def save_api_key(user_id, api_key):
     users.update_one(
         {"user_id": user_id},
-        {"$set": {"gemini_key": encrypt_key(api_key)}}
+        {
+            "$set": {
+                "gemini_key": encrypt_key(api_key)
+            }
+        }
     )
+
 
 
 def get_api_key(user_id):
     user = users.find_one({"user_id": user_id})
 
     if user and user.get("gemini_key"):
-        return decrypt_key(user["gemini_key"])
+        try:
+            return decrypt_key(user["gemini_key"])
+        except Exception as e:
+            print("Decrypt error:", e)
+            return None
 
     return None
+
 
 
 def increment_usage(user_id):
@@ -83,7 +98,7 @@ def increment_usage(user_id):
 
 
 # =========================
-# 🤖 GEMINI AI (WITH FALLBACK)
+# 🤖 GEMINI AI
 # =========================
 def get_gemini_response(text, api_key):
 
@@ -100,13 +115,15 @@ def get_gemini_response(text, api_key):
         )
 
         try:
-            res = requests.post(
+            response = requests.post(
                 url,
                 json={
                     "contents": [
                         {
                             "parts": [
-                                {"text": text}
+                                {
+                                    "text": text
+                                }
                             ]
                         }
                     ]
@@ -114,42 +131,70 @@ def get_gemini_response(text, api_key):
                 timeout=30
             )
 
-            print(f"Trying model: {model}")
-            print("Status:", res.status_code)
-            print("Response:", res.text)
+            print("====================")
+            print("MODEL:", model)
+            print("STATUS:", response.status_code)
+            print("BODY:", response.text)
+            print("====================")
 
-            if res.status_code == 200:
-                data = res.json()
+            # Success
+            if response.status_code == 200:
 
-                if "candidates" in data:
-                    return data["candidates"][0]["content"]["parts"][0]["text"]
+                data = response.json()
 
-            elif res.status_code in [429, 500, 503]:
+                if (
+                    "candidates" in data
+                    and len(data["candidates"]) > 0
+                ):
+
+                    parts = data["candidates"][0]["content"]["parts"]
+
+                    if len(parts) > 0:
+                        return parts[0].get("text", "⚠️ Empty AI response")
+
+            # Fallback errors
+            elif response.status_code in [429, 500, 503]:
                 print(f"{model} failed. Trying fallback...")
                 continue
 
+            # Invalid key
+            elif response.status_code == 400:
+                return "⚠️ Invalid API request or API key."
+
+            elif response.status_code == 401:
+                return "⚠️ Unauthorized API key."
+
+            elif response.status_code == 403:
+                return "⚠️ API access denied."
+
+            elif response.status_code == 404:
+                print(f"{model} not found. Trying fallback...")
+                continue
+
         except Exception as e:
-            print(f"{model} error:", str(e))
+            print(f"{model} ERROR:", str(e))
             continue
 
-    return "⚠️ All AI models are currently unavailable."
+    return "⚠️ All Gemini models are currently unavailable."
 
 
 # =========================
 # 📤 TELEGRAM
 # =========================
 def send_message(chat_id, text):
+
     try:
         requests.post(
             f"{TELEGRAM_API_URL}/sendMessage",
             json={
                 "chat_id": chat_id,
-                "text": text
-            }
+                "text": str(text)
+            },
+            timeout=20
         )
 
     except Exception as e:
-        print("Telegram error:", e)
+        print("Telegram send error:", e)
 
 
 # =========================
@@ -158,93 +203,93 @@ def send_message(chat_id, text):
 @app.route("/webhook", methods=["POST"])
 def webhook():
 
-    data = request.get_json()
-    message = data.get("message")
+    try:
 
-    if not message:
+        data = request.get_json()
+
+        if not data:
+            return "OK", 200
+
+        message = data.get("message")
+
+        if not message:
+            return "OK", 200
+
+        chat_id = message["chat"]["id"]
+        user_id = message["from"]["id"]
+        username = message["from"].get("username", "NoUsername")
+        text = message.get("text", "")
+
+        save_user(user_id, username)
+
+        # =========================
+        # COMMANDS
+        # =========================
+        if text == "/start":
+
+            reply = (
+                "🤖 Welcome to Chenura AI Bot\n\n"
+                "🔑 Set your Gemini API key:\n"
+                "/setkey\n\n"
+                "📊 Check usage:\n"
+                "/myusage"
+            )
+
+        elif text == "/setkey":
+
+            reply = (
+                "🔑 Get your Gemini API key:\n"
+                "https://aistudio.google.com/app/apikey\n\n"
+                "Send like this:\n\n"
+                "key: YOUR_API_KEY"
+            )
+
+        elif text.lower().startswith("key:"):
+
+            key = text.split("key:", 1)[1].strip()
+
+            if len(key) < 10:
+                reply = "❌ Invalid API key format."
+            else:
+                save_api_key(user_id, key)
+                reply = "✅ API key saved securely 🔐"
+
+        elif text == "/myusage":
+
+            user = users.find_one({"user_id": user_id})
+
+            used = user.get("requests", 0) if user else 0
+
+            reply = f"📊 Your usage: {used}"
+
+        elif text == "/users":
+
+            if str(user_id) != str(ADMIN_TELEGRAM_ID):
+                reply = "❌ Admin only command."
+            else:
+                total_users = users.count_documents({})
+                reply = f"👥 Total users using bot: {total_users}"
+
+        # =========================
+        # AI CHAT
+        # =========================
+        else:
+
+            api_key = get_api_key(user_id)
+
+            if not api_key:
+                reply = "🔑 Please set your API key first using /setkey"
+            else:
+                reply = get_gemini_response(text, api_key)
+                increment_usage(user_id)
+
+        send_message(chat_id, reply)
+
         return "OK", 200
 
-    chat_id = message["chat"]["id"]
-    user_id = message["from"]["id"]
-    username = message["from"].get("username", "NoUsername")
-    text = message.get("text", "")
-
-    save_user(user_id, username)
-
-    # =========================
-    # COMMANDS
-    # =========================
-
-    if text == "/start":
-
-        reply = """
-🤖 Welcome to Chenura AI Bot
-
-🔑 Set your API key:
-/setkey
-
-📊 Check usage:
-/myusage
-"""
-
-    elif text == "/setkey":
-
-        reply = (
-            "🔑 Get your Gemini API key:\n"
-            "https://aistudio.google.com/app/apikey\n\n"
-            "Send:\n"
-            "key: YOUR_API_KEY"
-        )
-
-    elif text.lower().startswith("key:"):
-
-        key = text.split("key:")[1].strip()
-
-        save_api_key(user_id, key)
-
-        reply = "✅ API key saved securely 🔐"
-
-    elif text == "/myusage":
-
-        user = users.find_one({"user_id": user_id})
-
-        used = user.get("requests", 0) if user else 0
-
-        reply = f"📊 Your usage: {used}"
-
-    # =========================
-    # 👑 ADMIN ONLY COMMAND
-    # =========================
-    elif text == "/users":
-
-        if user_id != ADMIN_TELEGRAM_ID:
-            reply = "❌ You are not authorized to use this command."
-
-        else:
-            total_users = users.count_documents({})
-
-            reply = f"👥 Total users using this bot: {total_users}"
-
-    # =========================
-    # AI CHAT
-    # =========================
-    else:
-
-        api_key = get_api_key(user_id)
-
-        if not api_key:
-
-            reply = "🔑 Please set your API key using /setkey"
-
-        else:
-
-            reply = get_gemini_response(text, api_key)
-
-            increment_usage(user_id)
-
-    send_message(chat_id, reply)
-
-    return "OK", 200
+    except Exception as e:
+        print("Webhook error:", e)
+        return "OK", 200
 
 
 # =========================
@@ -261,7 +306,6 @@ def login():
         ):
 
             session["admin"] = True
-
             return redirect("/dashboard")
 
         return "❌ Invalid credentials"
@@ -270,7 +314,6 @@ def login():
     <h2>🔐 Admin Login</h2>
 
     <form method="POST">
-
         Username:<br>
         <input name="username"><br><br>
 
@@ -278,7 +321,6 @@ def login():
         <input type="password" name="password"><br><br>
 
         <button>Login</button>
-
     </form>
     """
 
@@ -313,47 +355,43 @@ def dashboard():
 
     return f"""
     <!DOCTYPE html>
-
     <html>
-
     <head>
 
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
         <style>
-
             body {{
-                background: #0f172a;
-                color: white;
-                font-family: Arial;
-                padding: 20px;
+                background:#0f172a;
+                color:white;
+                font-family:Arial;
+                padding:20px;
             }}
 
             .card {{
-                background: #1e293b;
-                padding: 20px;
-                border-radius: 10px;
-                margin-bottom: 20px;
+                background:#1e293b;
+                padding:20px;
+                border-radius:10px;
+                margin-bottom:20px;
             }}
 
             table {{
-                width: 100%;
-                border-collapse: collapse;
+                width:100%;
+                border-collapse:collapse;
             }}
 
             th, td {{
-                padding: 10px;
-                border-bottom: 1px solid #334155;
+                padding:10px;
+                border-bottom:1px solid #334155;
             }}
 
             tr:hover {{
-                background: #334155;
+                background:#334155;
             }}
 
             a {{
-                color: cyan;
+                color:cyan;
             }}
-
         </style>
 
     </head>
@@ -376,7 +414,6 @@ def dashboard():
             <h2>Top Users</h2>
 
             <table>
-
                 <tr>
                     <th>ID</th>
                     <th>Username</th>
@@ -392,28 +429,19 @@ def dashboard():
         <a href="/logout">Logout</a>
 
         <script>
-
             new Chart(document.getElementById("chart"), {{
-
                 type: "bar",
-
                 data: {{
-
                     labels: ["Users", "Requests"],
-
                     datasets: [{{
                         label: "Stats",
                         data: [{total_users}, {total_requests}]
                     }}]
-
                 }}
-
             }});
-
         </script>
 
     </body>
-
     </html>
     """
 
@@ -434,8 +462,7 @@ def logout():
 # =========================
 @app.route("/")
 def home():
-
-    return "Bot running", 200
+    return "Bot running successfully 🚀", 200
 
 
 # =========================
@@ -449,3 +476,30 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port
     )
+```
+
+# IMPORTANT ENV VARIABLES
+
+Add these in Render/Railway:
+
+```env
+BOT_TOKEN=your_bot_token
+MONGO_URI=your_mongodb_url
+ENCRYPTION_KEY=your_fernet_key
+SECRET_KEY=your_secret_key
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123
+ADMIN_TELEGRAM_ID=your_telegram_numeric_id
+```
+
+# MOST COMMON REASON BOT BREAKS
+
+Usually this line crashes:
+
+```python
+ADMIN_TELEGRAM_ID = int(os.environ.get("ADMIN_TELEGRAM_ID"))
+```
+
+if the env variable is missing.
+
+The fixed version avoids that crash.
